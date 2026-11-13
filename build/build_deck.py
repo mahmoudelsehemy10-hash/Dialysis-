@@ -33,7 +33,7 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
-from content import SLIDES, FOOTER_TEXT, TITLE, SUBTITLE, PRESENTER, DATE_LOCATION
+FOOTER_TEXT = ""
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -492,7 +492,7 @@ def r_flow(s, sp, im):
     for i, (head, body) in enumerate(steps):
         x = 0.64 + i * (w + gap)
         card(s, x, 1.6, w, 2.45, head, [body] if isinstance(body, str) else body,
-             head=["navy", "blue", "mid", "blue"][i % 4], size=12, title_size=14, head_h=0.55)
+             head=["navy", "blue", "mid", "blue"][i % 4], size=13, title_size=14, head_h=0.55)
         if i < n - 1:
             a = s.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(x + w + 0.05), Inches(2.6),
                                    Inches(gap - 0.1), Inches(0.35))
@@ -744,6 +744,132 @@ def r_references(s, sp, im):
            [(f"{start + i}. {r}", {"size": 10, "space_after": 3}) for i, r in enumerate(chunk)])
 
 
+
+
+
+def r_steps(s, sp, im):
+    """Numbered vertical action steps (left) + side panel (right)."""
+    steps = sp["steps"]
+    gap = sp.get("gap", 0.08)
+    avail = 4.95
+    h = min(0.95, (avail - gap * (len(steps) - 1)) / len(steps))
+    w = sp.get("w", 7.6)
+    for i, (head, body) in enumerate(steps):
+        y = 1.5 + i * (h + gap)
+        box(s, 0.64, y, w, h, fill="tint", name=f"Step {i+1}")
+        circle_num(s, 0.76, y + (h - 0.5) / 2, 0.5, i + 1, fill="blue", size=14)
+        tb(s, 1.4, y, w - 0.85, h, [(head, {"bold": True, "size": 14, "color": NAVY, "space_after": 1}),
+                                    (body, {"size": 12})], anchor=MSO_ANCHOR.MIDDLE)
+    side = sp.get("side")
+    if side:
+        x = 0.64 + w + 0.3
+        sw = 12.69 - x
+        box(s, x, 1.5, sw, 4.95, fill=side.get("fill", "navy"), name="Side panel")
+        light = side.get("fill", "navy") in ("navy", "blue")
+        tc = WHITE if light else INK
+        tb(s, x + 0.2, 1.65, sw - 0.4, 0.6, [(side["head"], {"bold": True, "size": 16,
+                                                             "color": WHITE if light else BLUE})])
+        tb(s, x + 0.2, 2.3, sw - 0.4, 4.0,
+           [(b, {"bullet": True, "space_after": 7, "color": tc, "bullet_color": LIGHT if light else BLUE})
+            if isinstance(b, str) else b for b in side["body"]], size=13)
+
+
+def r_checklist(s, sp, im):
+    """Two (or three) checklist columns with tick circles."""
+    cols = sp["columns"]
+    n = len(cols)
+    gap = 0.3
+    w = (12.05 - gap * (n - 1)) / n
+    hgt = sp.get("h", 4.95)
+    for i, (head, items) in enumerate(cols):
+        x = 0.64 + i * (w + gap)
+        box(s, x, 1.5, w, hgt, fill="tint", name=f"{head} panel")
+        hb = box(s, x, 1.5, w, 0.5, fill=["blue", "navy", "mid"][i % 3], name=f"{head} header")
+        tf = hb.text_frame; tf.margin_left = Inches(0.12); tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        r = tf.paragraphs[0].add_run(); r.text = head; r.font.size = Pt(15); r.font.bold = True
+        r.font.color.rgb = WHITE
+        step = sp.get("row_h", 0.5)
+        for j, it in enumerate(items):
+            y = 2.12 + j * step
+            c = box(s, x + 0.15, y + 0.06, 0.28, 0.28, fill="blue", shape=MSO_SHAPE.OVAL, name="tick")
+            ctf = c.text_frame; ctf.margin_left = ctf.margin_right = ctf.margin_top = ctf.margin_bottom = 0
+            ctf.vertical_anchor = MSO_ANCHOR.MIDDLE
+            pp = ctf.paragraphs[0]; pp.alignment = PP_ALIGN.CENTER
+            rr = pp.add_run(); rr.text = "✓"; rr.font.size = Pt(11); rr.font.bold = True; rr.font.color.rgb = WHITE
+            tb(s, x + 0.55, y, w - 0.7, step, [it], size=sp.get("size", 13))
+    if sp.get("banner"):
+        by = 1.5 + hgt + 0.2
+        box(s, 0.64, by, 12.05, 6.45 - by, fill="sand", name="Key message")
+        tb(s, 0.84, by, 11.65, 6.45 - by, [(sp["banner"], {"size": 14, "bold": True, "color": NAVY})],
+           anchor=MSO_ANCHOR.MIDDLE)
+
+
+def r_case(s, sp, im):
+    """Case scenario: patient story (left) and discussion questions (right). Answers go in the notes."""
+    box(s, 0.64, 1.5, 6.3, 4.95, fill="navy", name="Case panel")
+    tb(s, 0.84, 1.62, 5.9, 0.5, [(sp.get("case_head", "Case scenario"), {"bold": True, "size": 16, "color": WHITE})])
+    tb(s, 0.84, 2.15, 5.9, 4.2, [(t, {"size": 14, "color": WHITE, "space_after": 10}) for t in sp["case"]])
+    box(s, 7.25, 1.5, 5.44, 4.95, fill="sand", name="Questions panel")
+    tb(s, 7.45, 1.62, 5.04, 0.5, [("Discuss", {"bold": True, "size": 16, "color": BLUE})])
+    for i, q in enumerate(sp["questions"]):
+        y = 2.2 + i * 1.0
+        circle_num(s, 7.45, y + 0.05, 0.45, i + 1, fill="blue", size=13)
+        tb(s, 8.05, y, 4.45, 0.95, [q], size=13)
+
+
+def r_stat_cards(s, sp, im):
+    """Row of 3–4 big-number stat cards + bullet panel below."""
+    stats = sp["stats"]
+    n = len(stats)
+    gap = 0.25
+    w = (12.05 - gap * (n - 1)) / n
+    for i, (num, label) in enumerate(stats):
+        x = 0.64 + i * (w + gap)
+        box(s, x, 1.5, w, 1.75, fill=["blue", "navy", "mid", "navy"][i % 4], name=f"Stat {i+1}")
+        tb(s, x + 0.15, 1.58, w - 0.3, 0.8, [(num, {"bold": True, "size": 28, "color": WHITE})])
+        tb(s, x + 0.15, 2.38, w - 0.3, 0.85, [(label, {"size": 12, "color": WHITE})])
+    lc = sp.get("cards")
+    if lc:
+        gw = (12.05 - 0.3) / len(lc)
+        for i, (head, body) in enumerate(lc):
+            card(s, 0.64 + i * (gw + 0.3), 3.5, gw, 2.95, head, body,
+                 head=["blue", "grey", "mid"][i % 3], size=13, title_size=14, head_h=0.45)
+
+
+def r_formula(s, sp, im):
+    """Formula panels (left) + worked example card (right) + optional native chart."""
+    y = 1.5
+    for head, formula, note in sp["formulas"]:
+        box(s, 0.64, y, 6.4, 1.45, fill="navy", name=f"{head} formula")
+        tb(s, 0.84, y + 0.05, 6.0, 1.35,
+           [(head, {"bold": True, "size": 13, "color": LIGHT, "space_after": 2}),
+            (formula, {"bold": True, "size": 16, "color": WHITE, "space_after": 2}),
+            (note, {"size": 11, "color": WHITE})], anchor=MSO_ANCHOR.MIDDLE)
+        y += 1.6
+    if sp.get("below"):
+        tb(s, 0.64, y, 6.4, 6.45 - y, [(b, {"bullet": True, "space_after": 5}) for b in sp["below"]], size=13)
+    ex = sp["example"]
+    card(s, 7.35, 1.5, 5.34, 4.95, ex["head"], ex["body"], head="blue", size=13)
+
+
+def r_matrix(s, sp, im):
+    """Decision/escalation matrix: coloured level labels with actions (table-like, shapes)."""
+    rows = sp["rows"]
+    h = min(1.05, (4.95 - 0.1 * (len(rows) - 1)) / len(rows))
+    fills = sp.get("fills", ["mid", "blue", "navy", "grey"])
+    for i, (level, trigger, action) in enumerate(rows):
+        y = 1.5 + i * (h + 0.1)
+        lb = box(s, 0.64, y, 2.4, h, fill=fills[i % len(fills)], name=f"Level {i+1}")
+        tf = lb.text_frame; tf.vertical_anchor = MSO_ANCHOR.MIDDLE; tf.word_wrap = True
+        tf.margin_left = Inches(0.1)
+        r = tf.paragraphs[0].add_run(); r.text = level; r.font.size = Pt(14); r.font.bold = True
+        r.font.color.rgb = WHITE
+        box(s, 3.1, y, 4.0, h, fill="tint", name=f"Trigger {i+1}")
+        tb(s, 3.2, y, 3.8, h, [trigger], size=12, anchor=MSO_ANCHOR.MIDDLE)
+        box(s, 7.16, y, 5.53, h, fill="sand", name=f"Action {i+1}")
+        tb(s, 7.26, y, 5.33, h, [action], size=12, anchor=MSO_ANCHOR.MIDDLE)
+
+
 RENDER = {
     "agenda": r_agenda, "split_cards": r_split_cards, "criteria": r_criteria,
     "image_two_lists": r_image_two_lists, "columns": r_columns, "table_side": r_table_side,
@@ -752,47 +878,45 @@ RENDER = {
     "six_grid": r_six_grid, "two_cards": r_two_cards, "compartments": r_compartments,
     "levers": r_levers, "ufr": r_ufr, "table_only": r_table_only, "electrolytes": r_electrolytes,
     "takeaways": r_takeaways, "references": r_references,
+    "steps": r_steps, "checklist": r_checklist, "case": r_case, "stat_cards": r_stat_cards,
+    "formula": r_formula, "matrix": r_matrix,
 }
 
 
 # -------------------------------------------------------------------- main ---
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--template", default=os.path.join(ROOT, "Multiorgan Support With Outline  -  Repaired.pptx"))
-    ap.add_argument("--zips", default=ROOT, help="folder holding Dialysis.zip, vascular access.zip …")
-    ap.add_argument("--out", default=os.path.join(ROOT, "output", "Hemodialysis_Fundamentals_FMC.pptx"))
-    args = ap.parse_args()
-
-    images = crop_images(args.zips, os.path.join(ROOT, "build", "images"))
-    prs = Presentation(args.template)     # opened read-only; saved under a new name
+def build(mod, out, template, images):
+    """Build one deck from a content module (see content.py / lectures/Lxx.py)."""
+    global FOOTER_TEXT
+    FOOTER_TEXT = mod.FOOTER_TEXT
+    prs = Presentation(template)          # opened read-only; saved under a new name
     delete_slides(prs, keep={KEEP_TITLE_IDX, KEEP_END_IDX})
     title_slide, end_slide = prs.slides[0], prs.slides[1]
 
-    # Title slide: fill the existing template placeholders / presenter text box
     for sh in title_slide.shapes:
         if sh.is_placeholder and sh.placeholder_format.idx == 20:
-            set_text_keep_format(sh, [TITLE])
-            # subtitle as a second, smaller paragraph
+            set_text_keep_format(sh, [mod.TITLE])
+            if len(mod.TITLE) > 34:
+                for r in sh.text_frame.paragraphs[0].runs:
+                    r.font.size = Pt(22 if len(mod.TITLE) > 60 else 26)
             p = sh.text_frame.add_paragraph()
-            r = p.add_run(); r.text = SUBTITLE; r.font.size = Pt(14); r.font.bold = False
+            r = p.add_run(); r.text = mod.SUBTITLE; r.font.size = Pt(14); r.font.bold = False
         elif sh.is_placeholder and sh.placeholder_format.idx == 22:
-            set_text_keep_format(sh, [DATE_LOCATION])
+            set_text_keep_format(sh, [mod.DATE_LOCATION])
         elif sh.shape_type == 17 and sh.has_text_frame and "Elsehemy" in sh.text_frame.text:
-            set_text_keep_format(sh, PRESENTER)
+            set_text_keep_format(sh, mod.PRESENTER)
             sh.top = Inches(6.45)
             for p in sh.text_frame.paragraphs:
                 p.space_after = Pt(2)
                 for r in p.runs:
                     r.font.size = Pt(13)
-    notes(title_slide, SLIDES[0]["notes"])
+    notes(title_slide, mod.SLIDES[0]["notes"])
 
-    for spec in SLIDES[1:]:
+    for spec in mod.SLIDES[1:]:
         if spec["kind"] == "chapter":
             build_chapter(prs, spec)
         else:
             build_content(prs, spec, images)
 
-    # move the reused "Thank you" slide to the end
     lst = prs.slides._sldIdLst
     end_id = lst[1]
     lst.remove(end_id)
@@ -800,15 +924,39 @@ def main():
     for sh in end_slide.placeholders:
         if sh.placeholder_format.idx == 21:
             sh.text_frame.text = "Questions and discussion"
-    notes(end_slide, "Thank you. Questions and discussion.\n\nInvite participants to the AREP eLearning "
-                     "modules (Introduction to Hemodialysis; Vascular Access; Fluid Management; Fluids, "
-                     "Electrolytes, Acids and Bases) for self-paced review.")
+    notes(end_slide, getattr(mod, "END_NOTES", "Thank you. Questions and discussion."))
 
-    prs.core_properties.title = TITLE
-    prs.core_properties.subject = SUBTITLE
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    prs.save(args.out)
-    print("Saved", args.out)
+    prs.core_properties.title = mod.TITLE
+    prs.core_properties.subject = mod.SUBTITLE
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    prs.save(out)
+    print("Saved", out)
+
+
+def main():
+    import importlib
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "build"))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--template", default=os.path.join(ROOT, "Multiorgan Support With Outline  -  Repaired.pptx"))
+    ap.add_argument("--zips", default=ROOT, help="folder holding Dialysis.zip, vascular access.zip …")
+    ap.add_argument("--deck", default="fundamentals",
+                    help="'fundamentals' (overview deck), 'all-lectures', or a lecture id such as L03")
+    ap.add_argument("--out", default=None, help="output path (single deck only)")
+    args = ap.parse_args()
+
+    images = crop_images(args.zips, os.path.join(ROOT, "build", "images"))
+    if args.deck == "fundamentals":
+        mod = importlib.import_module("content")
+        build(mod, args.out or os.path.join(ROOT, "output", "Hemodialysis_Fundamentals_FMC.pptx"),
+              args.template, images)
+        return
+    ids = [f"L{i:02d}" for i in range(1, 9)] if args.deck == "all-lectures" else [args.deck]
+    for lid in ids:
+        mod = importlib.import_module(f"lectures.{lid}")
+        out = args.out if (args.out and len(ids) == 1) else os.path.join(
+            ROOT, "output", "lectures", f"{lid}_{mod.SLUG}.pptx")
+        build(mod, out, args.template, images)
 
 
 if __name__ == "__main__":

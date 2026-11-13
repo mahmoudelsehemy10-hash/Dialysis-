@@ -5,11 +5,28 @@ The script generates `output/Hemodialysis_Fundamentals_FMC.pptx` from the upload
 ## Re-run
 
 ```bash
-pip install python-pptx Pillow        # if not installed
-python3 build/build_deck.py           # run from the repository root
+pip install python-pptx Pillow                       # if not installed
+python3 build/build_deck.py                          # overview deck (content.py)
+python3 build/build_deck.py --deck all-lectures      # 8 programme lectures -> output/lectures/
+python3 build/build_deck.py --deck L03               # one lecture
 ```
 
-Options: `--template <pptx>` (another FMC template), `--zips <folder>` (folder holding `Dialysis.zip` and `vascular access.zip`), `--out <path>`.
+Options: `--template <pptx>` (another FMC template), `--zips <folder>` (folder holding `Dialysis.zip` and `vascular access.zip`), `--out <path>` (single deck).
+
+## 4-day programme (output/lectures/)
+
+| Day | Lecture | Content file |
+|---|---|---|
+| 1 Patient Assessment & Safety | 01 Pre-Dialysis Patient Assessment and Prescription Verification | `lectures/L01.py` |
+| | 02 Fluid Assessment, Ultrafiltration Safety, and Intradialytic Hypotension | `lectures/L02.py` |
+| 2 Vascular Access & Infection Control | 03 Vascular Access Care: AVF/AVG Cannulation and CVC Safety | `lectures/L03.py` |
+| | 04 Infection Prevention in Hemodialysis | `lectures/L04.py` |
+| 3 Dialysis Quality & Water Safety | 05 Dialysis Adequacy: Kt/V, URR, and Correct Urea Sampling | `lectures/L05.py` |
+| | 06 Water and Dialysate Safety | `lectures/L06.py` |
+| 4 Emergencies & Quality Improvement | 07 Recognition and Immediate Management of HD Emergencies | `lectures/L07.py` |
+| | 08 HD Quality Indicators, Documentation, and Reporting | `lectures/L08.py` |
+
+Shared presenter, disclaimer and reference strings: `lectures/_common.py`. Each lecture has 13 slides plus the thank-you slide: objectives, content, a case with answers in the notes, takeaways and references. Statements that "NEED REVIEW" are marked in the speaker notes.
 
 PDF preview (requires LibreOffice): `soffice --headless --convert-to pdf output/Hemodialysis_Fundamentals_FMC.pptx --outdir output`
 
