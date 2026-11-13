@@ -281,6 +281,12 @@ def crop_images(zip_dir, out_dir):
         "rope_ladder.png": ("vascular access.zip",
                             "vascular access/Screenshot 2026-11-12 151911.png",
                             (1040, 291, 2081, 1061)),
+        "buttonhole.png": ("vascular access.zip",
+                           "vascular access/Screenshot 2026-11-12 152109.png", (894, 270, 2083, 1040)),
+        "dialysate_circuit.png": ("Dialysis.zip", "Dialysis/Screenshot 2026-11-12 141056.png",
+                                  (260, 340, 1200, 1075)),
+        "fluid_balance.png": ("Water Treatment.zip", "Water Treatment/Screenshot 2026-11-12 155202.png",
+                              (150, 370, 1560, 1105)),
     }
     os.makedirs(out_dir, exist_ok=True)
     paths = {}
@@ -539,7 +545,7 @@ def r_bar_compare(s, sp, im):
     for name, vals in c["series"]:
         cd.add_series(name, vals)
     gf = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.64), Inches(1.5), Inches(7.4),
-                            Inches(4.9), cd)
+                            Inches(c.get("h", 4.9)), cd)
     gf.name = c["name"]
     ch = gf.chart
     style_chart(ch, 12)
@@ -870,6 +876,437 @@ def r_matrix(s, sp, im):
         tb(s, 7.26, y, 5.33, h, [action], size=12, anchor=MSO_ANCHOR.MIDDLE)
 
 
+
+# ===================================================== programme renderers (v2) ===
+from pptx.enum.shapes import MSO_CONNECTOR
+from pptx.enum.dml import MSO_LINE_DASH_STYLE
+from pptx.enum.chart import XL_MARKER_STYLE
+
+ILLUSTRATIVE = "Illustrative training data: not actual patient or facility results"
+
+
+def _line(s, x1, y1, x2, y2, color, width=3, dash=False, name=None, arrow=False):
+    c = s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
+    c.line.color.rgb = color
+    c.line.width = Pt(width)
+    if dash:
+        c.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+    if arrow:
+        ln = c.line._get_or_add_ln()
+        ln.append(ln.makeelement(qn("a:tailEnd"), {"type": "triangle", "w": "med", "len": "med"}))
+    if name:
+        c.name = name
+    return c
+
+
+def _label(s, x, y, w, h, text, size=12, color=INK, bold=False, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE):
+    return tb(s, x, y, w, h, [(text, {"size": size, "color": color, "bold": bold, "align": align})],
+              anchor=anchor, margin=0.02)
+
+
+def _side_panel(s, side, x, y=1.5, h=4.95):
+    sw = 12.69 - x
+    fill = side.get("fill", "sand")
+    box(s, x, y, sw, h, fill=fill, name="Side panel")
+    dark = fill in ("navy", "blue")
+    tb(s, x + 0.2, y + 0.12, sw - 0.4, 0.55, [(side["head"], {"bold": True, "size": 15,
+                                                            "color": WHITE if dark else BLUE})])
+    tb(s, x + 0.2, y + 0.7, sw - 0.4, h - 0.85,
+       [(b, {"bullet": True, "space_after": 7, "color": WHITE if dark else INK,
+             "bullet_color": LIGHT if dark else BLUE}) if isinstance(b, str) else b for b in side["body"]],
+       size=side.get("size", 13))
+
+
+def _chart_note(s, x, y, w, text):
+    tb(s, x, y, w, 0.35, [(text, {"size": 10, "italic": True, "color": GREY_TXT})], margin=0.02)
+
+
+def r_opening(s, sp, im):
+    """Opening scenario: wide story band + 2–3 'think about' tiles."""
+    box(s, 0.64, 1.5, 12.05, 2.35, fill="navy", name="Opening scenario")
+    tb(s, 0.9, 1.62, 11.5, 0.45, [(sp.get("head", "Opening scenario"), {"bold": True, "size": 15, "color": LIGHT})])
+    tb(s, 0.9, 2.1, 11.5, 1.7, [(t, {"size": 17, "color": WHITE, "space_after": 6}) for t in sp["story"]])
+    qs = sp["prompts"]
+    n = len(qs)
+    w = (12.05 - 0.25 * (n - 1)) / n
+    for i, q in enumerate(qs):
+        x = 0.64 + i * (w + 0.25)
+        box(s, x, 4.1, w, 2.35, fill="tint", name=f"Prompt {i+1}")
+        circle_num(s, x + 0.2, 4.3, 0.55, "?", fill="blue", size=18)
+        tb(s, x + 0.2, 5.0, w - 0.4, 1.4, [(q, {"size": 15, "color": NAVY, "bold": True})])
+
+
+def r_kcheck(s, sp, im):
+    """Knowledge check: up to 4 question cards (2 x 2). Answers and rationales go in the notes."""
+    qs = sp["questions"]
+    cw, chh = 5.9, 2.35
+    for i, (q, opts) in enumerate(qs):
+        x = 0.64 + (i % 2) * (cw + 0.25)
+        y = 1.5 + (i // 2) * (chh + 0.25)
+        box(s, x, y, cw, chh, fill="tint", name=f"Question {i+1}")
+        circle_num(s, x + 0.15, y + 0.15, 0.5, f"Q{i+1}", fill="blue", size=12)
+        tb(s, x + 0.8, y + 0.1, cw - 0.95, 0.75, [(q, {"bold": True, "size": 13, "color": NAVY})])
+        if opts:
+            tb(s, x + 0.8, y + 0.85, cw - 0.95, chh - 0.95,
+               [(o, {"size": 12, "space_after": 2}) for o in opts])
+
+
+def _add_line_chart(s, c, x, y, w, h):
+    cd = CategoryChartData()
+    cd.categories = c["categories"]
+    for ser in c["series"]:
+        cd.add_series(ser[0], ser[1])
+    gf = s.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS if c.get("markers", True) else XL_CHART_TYPE.LINE,
+                            Inches(x), Inches(y), Inches(w), Inches(h), cd)
+    gf.name = c.get("name", "Line chart")
+    ch = gf.chart
+    style_chart(ch, 11)
+    ch.has_title = True
+    ch.chart_title.text_frame.text = c["title"]
+    r = ch.chart_title.text_frame.paragraphs[0].runs[0]
+    r.font.size = Pt(13); r.font.bold = True
+    ch.has_legend = len(c["series"]) > 1
+    if ch.has_legend:
+        ch.legend.position = XL_LEGEND_POSITION.BOTTOM
+        ch.legend.include_in_layout = False
+        ch.legend.font.size = Pt(11)
+    va = ch.value_axis
+    if "min" in c: va.minimum_scale = c["min"]
+    if "max" in c: va.maximum_scale = c["max"]
+    if "major" in c: va.major_unit = c["major"]
+    va.has_major_gridlines = True
+    va.major_gridlines.format.line.color.rgb = GREY_L
+    va.tick_labels.font.size = Pt(11)
+    va.tick_labels.number_format = c.get("axis_fmt", "General")
+    va.tick_labels.number_format_is_linked = False
+    if c.get("y_title"):
+        va.has_title = True
+        va.axis_title.text_frame.text = c["y_title"]
+        va.axis_title.text_frame.paragraphs[0].runs[0].font.size = Pt(11)
+    ca = ch.category_axis
+    ca.tick_labels.font.size = Pt(11)
+    if c.get("x_title"):
+        ca.has_title = True
+        ca.axis_title.text_frame.text = c["x_title"]
+        ca.axis_title.text_frame.paragraphs[0].runs[0].font.size = Pt(11)
+    plot = ch.plots[0]
+    for i, ser in enumerate(plot.series):
+        spec = c["series"][i]
+        col = spec[2] if len(spec) > 2 else BLUE
+        dashed = spec[3] if len(spec) > 3 else False
+        ser.format.line.color.rgb = col
+        ser.format.line.width = Pt(1.5 if dashed else 2.5)
+        ser.smooth = False
+        if dashed:
+            ser.format.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+            ser.marker.style = XL_MARKER_STYLE.NONE
+        else:
+            ser.marker.style = XL_MARKER_STYLE.CIRCLE
+            ser.marker.size = 7
+            ser.marker.format.fill.solid(); ser.marker.format.fill.fore_color.rgb = col
+            ser.marker.format.line.color.rgb = col
+        if c.get("labels") and not dashed and i == 0:
+            ser.data_labels.show_value = True
+            ser.data_labels.font.size = Pt(10)
+            ser.data_labels.number_format = c.get("fmt", "General")
+            ser.data_labels.number_format_is_linked = False
+            ser.data_labels.position = XL_LABEL_POSITION.ABOVE
+    return ch
+
+
+def r_line_chart(s, sp, im):
+    c = sp["chart"]
+    w = sp.get("chart_w", 7.6)
+    _add_line_chart(s, c, 0.64, 1.45, w, 4.65)
+    if c.get("note"):
+        _chart_note(s, 0.64, 6.12, w, c["note"])
+    if sp.get("side"):
+        _side_panel(s, sp["side"], 0.64 + w + 0.3)
+
+
+def r_stacked(s, sp, im):
+    """Horizontal stacked bar (e.g. UF volume composition) + formula/side panel."""
+    c = sp["chart"]
+    cd = CategoryChartData()
+    cd.categories = c["categories"]
+    for name, vals in c["series"]:
+        cd.add_series(name, vals)
+    w = sp.get("chart_w", 7.6)
+    gf = s.shapes.add_chart(XL_CHART_TYPE.BAR_STACKED, Inches(0.64), Inches(1.45), Inches(w), Inches(c.get("h", 3.0)), cd)
+    gf.name = c.get("name", "Stacked chart")
+    ch = gf.chart
+    style_chart(ch, 11)
+    ch.has_title = True
+    ch.chart_title.text_frame.text = c["title"]
+    r = ch.chart_title.text_frame.paragraphs[0].runs[0]; r.font.size = Pt(13); r.font.bold = True
+    ch.has_legend = True
+    ch.legend.position = XL_LEGEND_POSITION.BOTTOM; ch.legend.include_in_layout = False; ch.legend.font.size = Pt(11)
+    plot = ch.plots[0]
+    plot.gap_width = 40
+    plot.has_data_labels = c.get("labels", True)
+    if plot.has_data_labels:
+        plot.data_labels.number_format = c.get("fmt", '0.0" L"'); plot.data_labels.number_format_is_linked = False
+        plot.data_labels.position = XL_LABEL_POSITION.CENTER
+        plot.data_labels.font.size = Pt(12); plot.data_labels.font.bold = True; plot.data_labels.font.color.rgb = WHITE
+    for ser, col in zip(plot.series, c.get("colors", [BLUE, MID, NAVY, GREY])):
+        ser.format.fill.solid(); ser.format.fill.fore_color.rgb = col
+    va = ch.value_axis
+    va.minimum_scale = 0
+    if "max" in c: va.maximum_scale = c["max"]
+    va.has_major_gridlines = False; va.tick_labels.font.size = Pt(11)
+    ch.category_axis.tick_labels.font.size = Pt(11)
+    yb = 1.45 + c.get("h", 3.0)
+    if c.get("note"):
+        _chart_note(s, 0.64, yb + 0.02, w, c["note"])
+    if sp.get("below"):
+        b = sp["below"]
+        box(s, 0.64, yb + 0.45, w, 6.45 - yb - 0.45, fill="navy", name="Formula panel")
+        tb(s, 0.84, yb + 0.5, w - 0.4, 6.45 - yb - 0.55,
+           [(t, {"size": 13 if i else 14, "bold": i == 0, "color": WHITE if i else LIGHT, "space_after": 3})
+            for i, t in enumerate(b)], anchor=MSO_ANCHOR.MIDDLE)
+    if sp.get("side"):
+        _side_panel(s, sp["side"], 0.64 + w + 0.3)
+
+
+def r_dashboard(s, sp, im):
+    kpis = sp["kpis"]
+    n = len(kpis)
+    gap = 0.2
+    w = (12.05 - gap * (n - 1)) / n
+    for i, (val, label, ref) in enumerate(kpis):
+        x = 0.64 + i * (w + gap)
+        box(s, x, 1.45, w, 1.35, fill=["blue", "navy", "mid", "navy", "blue"][i % 5], name=f"KPI {i+1}")
+        tb(s, x + 0.12, 1.5, w - 0.24, 0.6, [(val, {"bold": True, "size": 24, "color": WHITE})])
+        tb(s, x + 0.12, 2.08, w - 0.24, 0.4, [(label, {"size": 11, "color": WHITE, "bold": True})])
+        tb(s, x + 0.12, 2.42, w - 0.24, 0.35, [(ref, {"size": 10, "color": LIGHT})])
+    _add_line_chart(s, sp["chart"], 0.64, 2.95, 7.6, 3.2)
+    _chart_note(s, 0.64, 6.12, 7.6, ILLUSTRATIVE)
+    if sp.get("side"):
+        _side_panel(s, sp["side"], 8.55, y=2.95, h=3.5)
+
+
+def r_algorithm(s, sp, im):
+    """Vertical flowchart. nodes: dict(t='start'|'action'|'decision'|'end', text, no=optional side action)."""
+    nodes = sp["nodes"]
+    n = len(nodes)
+    gap = 0.17
+    h = min(0.66, (4.95 - gap * (n - 1)) / n)
+    x, w = 0.64, sp.get("w", 5.6)
+    fills = {"start": "navy", "action": "tint", "decision": "mid", "end": "blue"}
+    shapes = {"start": MSO_SHAPE.ROUNDED_RECTANGLE, "action": MSO_SHAPE.RECTANGLE,
+              "decision": MSO_SHAPE.FLOWCHART_DECISION, "end": MSO_SHAPE.ROUNDED_RECTANGLE}
+    for i, nd in enumerate(nodes):
+        y = 1.5 + i * (h + gap)
+        t = nd.get("t", "action")
+        b = box(s, x, y, w, h, fill=fills[t], shape=shapes[t], name=f"Node {i+1}")
+        tf = b.text_frame; tf.word_wrap = True; tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf.margin_left = tf.margin_right = Inches(0.35 if t == "decision" else 0.1)
+        tf.margin_top = tf.margin_bottom = 0
+        p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
+        r = p.add_run(); r.text = nd["text"]; r.font.size = Pt(12 if t != "decision" else 11.5)
+        r.font.bold = t != "action"
+        r.font.color.rgb = NAVY if t == "action" else WHITE
+        if i < n - 1:
+            _line(s, x + w / 2, y + h, x + w / 2, y + h + gap, GREY_TXT, width=1.5, arrow=True)
+            if t == "decision":
+                _label(s, x + w / 2 + 0.05, y + h - 0.02, 0.5, 0.2, sp.get("yes", "Yes"), size=10, color=GREY_TXT, bold=True)
+        if nd.get("no"):
+            bx = x + w + 0.45
+            _line(s, x + w, y + h / 2, bx, y + h / 2, GREY_TXT, width=1.5, arrow=True)
+            _label(s, x + w + 0.02, y + h / 2 - 0.24, 0.45, 0.2, nd.get("no_label", "No"), size=10, color=GREY_TXT, bold=True)
+            nb = box(s, bx, y, sp.get("no_w", 3.0), h, fill="sand", name=f"Branch {i+1}")
+            tb(s, bx + 0.05, y, sp.get("no_w", 3.0) - 0.1, h, [(nd["no"], {"size": 11})], anchor=MSO_ANCHOR.MIDDLE, margin=0.04)
+    if sp.get("side"):
+        _side_panel(s, sp["side"], 0.64 + w + 0.45 + sp.get("no_w", 3.0) + 0.3)
+
+
+def r_pathway(s, sp, im):
+    """Horizontal process with optional numbered monitoring points and cards below."""
+    nodes = sp["nodes"]
+    n = len(nodes)
+    gap = 0.32
+    w = (12.05 - gap * (n - 1)) / n
+    y = 1.55
+    hh = sp.get("node_h", 1.35)
+    for i, (head, sub) in enumerate(nodes):
+        x = 0.64 + i * (w + gap)
+        b = box(s, x, y, w, hh, fill=["navy", "blue", "mid"][i % 3] if not sp.get("mono") else "blue",
+                shape=MSO_SHAPE.ROUNDED_RECTANGLE, name=f"Step {i+1}")
+        tb(s, x + 0.06, y + 0.05, w - 0.12, hh - 0.1,
+           [(head, {"bold": True, "size": 13, "color": WHITE, "align": PP_ALIGN.CENTER, "space_after": 2}),
+            (sub, {"size": 11, "color": WHITE, "align": PP_ALIGN.CENTER})], anchor=MSO_ANCHOR.MIDDLE, margin=0.03)
+        if i < n - 1:
+            _line(s, x + w + 0.03, y + hh / 2, x + w + gap - 0.03, y + hh / 2, GREY_TXT, width=2, arrow=True)
+    marks = sp.get("markers", [])
+    if marks:
+        my = y + hh + 0.15
+        seen = {}
+        for j, (idx, text) in enumerate(marks):
+            k = seen.get(idx, 0); seen[idx] = k + 1
+            total = sum(1 for m in marks if m[0] == idx)
+            x = 0.64 + idx * (w + gap) + w / 2 + (k - (total - 1) / 2) * 0.46
+            _line(s, x, y + hh, x, my + 0.05, NAVY, width=1.5)
+            circle_num(s, x - 0.19, my + 0.05, 0.38, j + 1, fill="navy", size=12)
+        ly = my + 0.55
+        cols = sp.get("marker_cols", 2)
+        per = (len(marks) + cols - 1) // cols
+        cw = (12.05 - 0.3 * (cols - 1)) / cols
+        for j, (idx, text) in enumerate(marks):
+            cx = 0.64 + (j // per) * (cw + 0.3)
+            cy = ly + (j % per) * 0.5
+            circle_num(s, cx, cy + 0.06, 0.34, j + 1, fill="navy", size=11)
+            tb(s, cx + 0.45, cy, cw - 0.5, 0.48, [text], size=12, anchor=MSO_ANCHOR.MIDDLE)
+    if sp.get("cards"):
+        cards = sp["cards"]
+        cy = y + hh + 0.35
+        cw = (12.05 - 0.3 * (len(cards) - 1)) / len(cards)
+        for i, (head, body) in enumerate(cards):
+            card(s, 0.64 + i * (cw + 0.3), cy, cw, 6.45 - cy, head, body,
+                 head=["grey", "blue", "navy"][i % 3], size=13, title_size=14, head_h=0.45)
+
+
+def r_access_schematic(s, sp, im):
+    """Editable schematics of AVF, AVG and tunnelled CVC (not to scale)."""
+    RED = RGBColor(0xC0, 0x39, 0x2B)
+    VEIN = RGBColor(0x2E, 0x6D, 0xB4)
+    GRAFT = RGBColor(0x7F, 0x7F, 0x7F)
+    pw, gap = 3.85, 0.25
+    titles = ["AV fistula (AVF)", "AV graft (AVG)", "Tunnelled CVC"]
+    for i in range(3):
+        x = 0.64 + i * (pw + gap)
+        box(s, x, 1.45, pw, 2.75, fill="tint", name=f"{titles[i]} panel")
+        _label(s, x + 0.1, 1.5, pw - 0.2, 0.35, titles[i], size=14, color=NAVY, bold=True)
+    # AVF: artery joined directly to vein
+    x = 0.64
+    _line(s, x + 0.3, 3.75, x + 3.55, 3.75, RED, 7, name="AVF artery")
+    _line(s, x + 0.9, 3.72, x + 3.55, 2.35, VEIN, 9, name="AVF arterialised vein")
+    circle = box(s, x + 0.78, 3.6, 0.28, 0.28, fill="navy", shape=MSO_SHAPE.OVAL, name="AVF anastomosis")
+    _label(s, x + 0.2, 3.85, 1.6, 0.3, "Anastomosis", size=11, bold=True)
+    _label(s, x + 2.4, 3.8, 1.3, 0.3, "Artery", size=11, color=RED, bold=True)
+    _label(s, x + 2.05, 2.05, 1.7, 0.3, "Vein (arterialised)", size=11, color=VEIN, bold=True)
+    _label(s, x + 0.25, 2.0, 1.6, 0.5, "Own vessels; needles go into the vein", size=10)
+    # AVG: synthetic tube between artery and vein
+    x = 0.64 + pw + gap
+    _line(s, x + 0.3, 3.75, x + 3.55, 3.75, RED, 7, name="AVG artery")
+    _line(s, x + 0.3, 2.35, x + 3.55, 2.35, VEIN, 7, name="AVG vein")
+    _line(s, x + 0.8, 3.72, x + 3.0, 2.38, GRAFT, 11, name="AVG synthetic graft")
+    _label(s, x + 2.4, 3.8, 1.3, 0.3, "Artery", size=11, color=RED, bold=True)
+    _label(s, x + 2.6, 2.0, 1.1, 0.3, "Vein", size=11, color=VEIN, bold=True)
+    _label(s, x + 0.25, 2.65, 1.75, 0.45, "Synthetic graft: needles go into the graft", size=10, color=INK)
+    # CVC: catheter in internal jugular vein, tip near right atrium, tunnel to chest exit site
+    x = 0.64 + 2 * (pw + gap)
+    _line(s, x + 1.2, 1.95, x + 1.2, 3.55, VEIN, 12, name="Jugular vein and SVC")
+    ra = box(s, x + 0.95, 3.5, 0.55, 0.5, fill=RGBColor(0x8E, 0x44, 0xAD), shape=MSO_SHAPE.OVAL, name="Right atrium")
+    _line(s, x + 1.2, 2.2, x + 1.2, 3.45, NAVY, 3, name="Catheter in vein")
+    _line(s, x + 1.2, 2.2, x + 2.5, 3.2, NAVY, 3, name="Subcutaneous tunnel")
+    box(s, x + 2.05, 2.8, 0.18, 0.12, fill="grey", name="Cuff")
+    exit_ = box(s, x + 2.42, 3.13, 0.18, 0.18, fill="white", line="navy", shape=MSO_SHAPE.OVAL, name="Exit site")
+    _line(s, x + 2.5, 3.22, x + 3.2, 3.75, NAVY, 3, name="External limbs")
+    _label(s, x + 0.15, 1.85, 1.0, 0.45, "Internal jugular vein", size=10, color=VEIN, bold=True)
+    _label(s, x + 0.1, 3.55, 0.85, 0.45, "Tip near right atrium", size=10, bold=True)
+    _label(s, x + 2.3, 2.5, 1.0, 0.3, "Cuff", size=10)
+    _label(s, x + 2.65, 3.0, 1.15, 0.3, "Exit site", size=10, bold=True)
+    _label(s, x + 2.5, 3.75, 1.3, 0.35, "Red/blue hubs", size=10)
+    _chart_note(s, 0.64, 4.22, 12.05, "Editable schematic, not to scale. Sites and configurations vary: follow the access record and surgical/radiology notes.")
+    for i, (head, body) in enumerate(sp["implications"]):
+        x = 0.64 + i * (pw + gap)
+        card(s, x, 4.6, pw, 1.85, head, body, head=["blue", "mid", "navy"][i], size=12, title_size=13, head_h=0.42)
+
+
+def r_zones(s, sp, im):
+    zones = sp["zones"]
+    n = len(zones)
+    gap = 0.55
+    w = (12.05 - gap * (n - 1)) / n
+    fills = ["mid", "blue", "grey"]
+    for i, (head, items) in enumerate(zones):
+        x = 0.64 + i * (w + gap)
+        box(s, x, 1.5, w, 3.6, fill="tint", name=f"{head} zone")
+        hb = box(s, x, 1.5, w, 0.55, fill=fills[i % 3], name=f"{head} header")
+        tf = hb.text_frame; tf.vertical_anchor = MSO_ANCHOR.MIDDLE; tf.margin_left = Inches(0.12)
+        r = tf.paragraphs[0].add_run(); r.text = head; r.font.size = Pt(15); r.font.bold = True; r.font.color.rgb = WHITE
+        tb(s, x + 0.1, 2.15, w - 0.2, 2.9, [(t, {"bullet": True, "space_after": 6}) for t in items], size=13)
+        if i < n - 1:
+            a = s.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(x + w + 0.07), Inches(3.0), Inches(gap - 0.14), Inches(0.5))
+            a.fill.solid(); a.fill.fore_color.rgb = NAVY; a.line.fill.background(); a.name = "One-way arrow"
+    box(s, 0.64, 5.3, 12.05, 1.15, fill="navy", name="Rule")
+    tb(s, 0.84, 5.3, 11.65, 1.15, [(sp["rule_head"], {"bold": True, "size": 15, "color": WHITE, "space_after": 3}),
+                                   (sp["rule"], {"size": 13, "color": WHITE})], anchor=MSO_ANCHOR.MIDDLE)
+
+
+def r_pdsa(s, sp, im):
+    cd = CategoryChartData()
+    cd.categories = ["Plan", "Do", "Study", "Act"]
+    cd.add_series("PDSA", [1, 1, 1, 1])
+    gf = s.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, Inches(0.64), Inches(1.45), Inches(4.6), Inches(4.6), cd)
+    gf.name = "PDSA cycle"
+    ch = gf.chart
+    style_chart(ch, 12)
+    ch.has_title = False
+    ch.has_legend = False
+    plot = ch.plots[0]
+    plot.has_data_labels = True
+    dl = plot.data_labels
+    dl.show_value = False; dl.show_category_name = True
+    dl.font.size = Pt(14); dl.font.bold = True; dl.font.color.rgb = WHITE
+    for i, col in enumerate([NAVY, BLUE, MID, GREY]):
+        pt = plot.series[0].points[i]; pt.format.fill.solid(); pt.format.fill.fore_color.rgb = col
+        pt.format.line.color.rgb = WHITE
+    _label(s, 2.0, 3.45, 1.9, 0.6, sp.get("centre", "PDSA"), size=16, color=NAVY, bold=True, align=PP_ALIGN.CENTER)
+    for i, (head, body) in enumerate(sp["steps"]):
+        y = 1.45 + i * 1.25
+        box(s, 5.6, y, 7.09, 1.12, fill="tint", name=f"{head} card")
+        hb = box(s, 5.6, y, 1.35, 1.12, fill=["navy", "blue", "mid", "grey"][i], name=f"{head} label")
+        tf = hb.text_frame; tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
+        r = p.add_run(); r.text = head; r.font.size = Pt(15); r.font.bold = True; r.font.color.rgb = WHITE
+        tb(s, 7.05, y, 5.55, 1.12, [body], size=12, anchor=MSO_ANCHOR.MIDDLE)
+    _chart_note(s, 0.64, 6.12, 4.8, ILLUSTRATIVE)
+
+
+def r_emergency(s, sp, im):
+    """Emergency card: circuit action badge + four quadrants (signs, priorities, avoid, escalate)."""
+    level = sp.get("circuit_level", "stop")
+    fill = {"stop": NAVY, "continue": MID, "protocol": BLUE}[level]
+    b = box(s, 0.64, 1.45, 12.05, 0.62, fill=fill, name="Circuit action")
+    tb(s, 0.84, 1.45, 11.65, 0.62, [("Circuit: " + sp["circuit"], {"bold": True, "size": 15, "color": WHITE})],
+       anchor=MSO_ANCHOR.MIDDLE)
+    quads = [("Warning signs", sp["signs"], "mid"), ("Immediate nursing priorities", sp["priorities"], "blue"),
+             ("Avoid", sp["avoid"], "grey"), ("Escalate", sp["escalate"], "navy")]
+    cw, chh = 5.9, 2.06
+    for i, (head, body, col) in enumerate(quads):
+        x = 0.64 + (i % 2) * (cw + 0.25)
+        y = 2.25 + (i // 2) * (chh + 0.15)
+        card(s, x, y, cw, chh, head, body, head=col, size=12, title_size=13, head_h=0.4)
+
+
+def r_two_images(s, sp, im):
+    pics = sp["images"]
+    w = (12.05 - 0.3) / 2
+    for i, (key, alt, head, body) in enumerate(pics):
+        x = 0.64 + i * (w + 0.3)
+        picture_fit(s, im[key], x, 1.45, w, 2.75, alt)
+        card(s, x, 4.3, w, 2.15, head, body, head=["blue", "mid"][i], size=12, title_size=14, head_h=0.42)
+    if sp.get("caption"):
+        _chart_note(s, 0.64, 4.0, 12.05, sp["caption"])
+
+
+def r_image_side(s, sp, im):
+    """One large uploaded picture with annotations panel on the right."""
+    w = sp.get("img_w", 7.3)
+    picture_fit(s, im[sp["image"]], 0.64, 1.45, w, 4.55, sp["image_alt"])
+    _chart_note(s, 0.64, 6.05, w, sp["caption"])
+    _side_panel(s, sp["side"], 0.64 + w + 0.3)
+
+
+def r_bar_side(s, sp, im):
+    """Single or clustered column chart + side panel; generalised bar_compare with note."""
+    r_bar_compare(s, sp, im)
+    if sp["chart"].get("note"):
+        _chart_note(s, 0.64, 6.12, 7.4, sp["chart"]["note"])
+
+
+
 RENDER = {
     "agenda": r_agenda, "split_cards": r_split_cards, "criteria": r_criteria,
     "image_two_lists": r_image_two_lists, "columns": r_columns, "table_side": r_table_side,
@@ -880,6 +1317,10 @@ RENDER = {
     "takeaways": r_takeaways, "references": r_references,
     "steps": r_steps, "checklist": r_checklist, "case": r_case, "stat_cards": r_stat_cards,
     "formula": r_formula, "matrix": r_matrix,
+    "opening": r_opening, "kcheck": r_kcheck, "line_chart": r_line_chart, "stacked": r_stacked,
+    "dashboard": r_dashboard, "algorithm": r_algorithm, "pathway": r_pathway,
+    "access_schematic": r_access_schematic, "zones": r_zones, "pdsa": r_pdsa, "emergency": r_emergency,
+    "two_images": r_two_images, "image_side": r_image_side, "bar_side": r_bar_side,
 }
 
 
@@ -912,6 +1353,9 @@ def build(mod, out, template, images):
     notes(title_slide, mod.SLIDES[0]["notes"])
 
     for spec in mod.SLIDES[1:]:
+        if spec.get("refs") == "AUTO":
+            from program.sources import S as _SRC
+            spec = dict(spec, refs=[_SRC[i]["cite"] for i in mod.REFS])
         if spec["kind"] == "chapter":
             build_chapter(prs, spec)
         else:
@@ -933,6 +1377,49 @@ def build(mod, out, template, images):
     print("Saved", out)
 
 
+PROGRAM = [("D1_01_Pre_Dialysis_Assessment", "program.D1_01"),
+           ("D1_02_Fluid_Assessment_UF_Safety", "program.D1_02"),
+           ("D2_03_Vascular_Access_Care", "program.D2_03"),
+           ("D2_04_Infection_Prevention", "program.D2_04"),
+           ("D3_05_Dialysis_Adequacy", "program.D3_05"),
+           ("D3_06_Water_Dialysate_Safety", "program.D3_06"),
+           ("D4_07_Hemodialysis_Emergencies", "program.D4_07"),
+           ("D4_08_Quality_Indicators", "program.D4_08")]
+
+
+def build_program(template, images, only=None):
+    """Build the eight programme decks and the source register."""
+    import csv
+    import importlib
+    from program.sources import S
+    out_dir = os.path.join(ROOT, "output", "program")
+    used = {}
+    for fname, modname in PROGRAM:
+        mod = importlib.import_module(modname)
+        for sid in mod.REFS:
+            if sid not in S:
+                raise KeyError(f"{modname}: unknown source id {sid}")
+            used.setdefault(sid, []).append(fname[:5])
+        if only and only not in fname:
+            continue
+        build(mod, os.path.join(out_dir, fname + ".pptx"), template, images)
+    rows = [(sid, S[sid]["kind"], S[sid]["status"], ", ".join(used.get(sid, [])) or "-", S[sid]["cite"], S[sid]["url"])
+            for sid in S]
+    with open(os.path.join(out_dir, "Source_Register.csv"), "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["ID", "Type", "Verification status (13 Nov 2026)", "Used in", "Reference", "Link"])
+        w.writerows(rows)
+    with open(os.path.join(out_dir, "Source_Register.md"), "w", encoding="utf-8") as f:
+        f.write("# Source register: 4-day hemodialysis nursing programme\n\n")
+        f.write("Verification status: *Uploaded* = read from uploaded AREP screenshots; *Web-verified* = key statements "
+                "confirmed by web search (13 Nov 2026); *Secondary only* = primary text not reachable, summaries used; "
+                "*Not accessed* = textbook/standard knowledge, reviewer must check.\n\n")
+        f.write("| ID | Type | Status | Used in | Reference | Link |\n|---|---|---|---|---|---|\n")
+        for r in rows:
+            f.write("| " + " | ".join(str(x).replace("|", "/") for x in r) + " |\n")
+    print("Saved source register")
+
+
 def main():
     import importlib
     import sys
@@ -946,6 +1433,9 @@ def main():
     args = ap.parse_args()
 
     images = crop_images(args.zips, os.path.join(ROOT, "build", "images"))
+    if args.deck == "program":
+        build_program(args.template, images)
+        return
     if args.deck == "fundamentals":
         mod = importlib.import_module("content")
         build(mod, args.out or os.path.join(ROOT, "output", "Hemodialysis_Fundamentals_FMC.pptx"),
